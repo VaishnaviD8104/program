@@ -1,0 +1,61 @@
+import requests
+
+# Replace 'YOUR_API_KEY' with your actual News API key
+api_key = 'fbe0af5849284bdc987e08f2e7833de9'
+
+# Base URL for News API requests
+base_url = "https://newsapi.org/v2/top-headlines"
+
+# Get user input for countryfbe0af5849284bdc987e08f2e7833de9 code
+country_code = input("Enter a two-letter country code (e.g., us for USA, cn for China): ")
+
+# Get user input for category
+print("\nHere are 20 news categories you can choose from:")
+categories = {
+    "business": "business",
+    "entertainment": "entertainment",
+    "general": "general",
+    "health": "health",
+    "science": "science",
+    "sports": "sports",
+    "technology": "technology",
+    "arts": "arts",
+    "books": "books",
+    "fashion": "fashion",
+    "food": "food",
+    "home": "home",
+    "gaming": "gaming",
+    "music": "music",
+    "movies": "movies",
+    "travel": "travel",
+    "motorsport": "motorsport",
+    "politics": "politics",
+    "world": "world"
+}
+
+for category, code in categories.items():
+    print(f"- {category} ({code})")
+
+category_code = input("\nEnter a news category code (or leave blank for no category): ")
+
+# Define query parameters
+query_params = {
+    "country": country_code.lower(),  # Convert to lowercase
+    "category": category_code
+}
+
+# Construct the full URL with query parameters
+url = base_url + "?" + "&".join(f"{key}={value}" for key, value in query_params.items())
+
+# Send a GET request with your API key in the headers
+headers = {"Authorization": f"Bearer {api_key}"}
+response = requests.get(url, headers=headers)
+
+# Check for successful response
+if response.status_code == 200:
+    data = response.json()
+    print("News headlines:")
+    for article in data["articles"]:
+        print(f"- {article['title']}")
+else:
+    print(f"Error: {response.status_code}")
