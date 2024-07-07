@@ -1,0 +1,505 @@
+import speech_recognition as sr
+import pyttsx3
+import webbrowser
+import pywhatkit as kit
+import pygame
+import time
+from datetime import datetime, timedelta
+from colorama import Fore, Back, Style, init
+import cv2
+import os
+import numpy as np
+import wikipedia
+import textwrap
+import requests
+from gtts import gTTS
+import asyncio
+import subprocess
+import folium
+from geopy.distance import distance
+from geopy.geocoders import Nominatim
+from geopy.distance import great_circle
+import google.generativeai as ai
+init(autoreset=True)
+
+
+speak_enabled = True
+camera_open = False
+cap = None
+translation_history = []
+
+API_KEY = 'AIzaSyBkMcatf6tikBK9rtSgfboTvNAjz4B0IPQ'
+
+ai.configure(api_key=API_KEY)
+
+model = ai.GenerativeModel("gemini-pro")
+chat = model.start_chat()
+
+common_apps = {
+    "chrome": r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+    "firefox": r"C:\Program Files\Mozilla Firefox\firefox.exe",
+    "edge": r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+    "brave": r"C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe",
+    "oracle": r"C:\app\mithu\product\21c\bin\oracle.exe",
+    "sql": r"C:\Program Files\MySQL\MySQL Server 8.0\bin\mysql.exe",
+    "intellij": r"C:\Program Files\JetBrains\IntelliJ IDEA 2024.1.1\bin\idea64.exe",
+    "word": r"C:\Program Files\Microsoft Office\root\Office16\WINWORD.EXE",
+    "ppt": r"C:\Program Files\Microsoft Office\root\Office16\POWERPNT.EXE",
+    "explorer": "explorer.exe"
+}
+
+def speak(text):
+    global speak_enabled
+    if speak_enabled:
+        engine = pyttsx3.init()
+        engine.say(text)
+        engine.runAndWait()
+
+    wrapped_text = textwrap.fill(text, width=80)
+    print(f'{Back.BLACK}{Fore.LIGHTBLUE_EX}{Style.BRIGHT}Chatbot: {Fore.RESET}{Back.BLACK}{Fore.YELLOW}{wrapped_text}{Style.RESET_ALL}')
+
+def reduce_noise(audio_data):
+    audio_array = np.frombuffer(audio_data, dtype=np.int16)
+    fft = np.fft.fft(audio_array)
+    magnitude = np.abs(fft)
+    threshold = np.mean(magnitude) * 2
+    fft[magnitude < threshold] = 0
+    return np.fft.ifft(fft).real.astype(np.int16).tobytes()
+
+speak_enabled = False
+camera_open = False
+cap = None
+translation_history = []
+
+def takeCommand():
+    global speak_enabled
+    if speak_enabled:
+        r = sr.Recognizer()
+        with sr.Microphone() as source:
+            r.pause_threshold = 1.5
+            r.energy_threshold = 4000
+            r.dynamic_energy_threshold = True
+            print(f'{Back.BLACK}{Fore.MAGENTA}{Style.BRIGHT}Listening...{Style.RESET_ALL}')
+            try:
+                audio = r.listen(source, timeout=5)
+                query = r.recognize_google(sr.AudioData(audio.get_raw_data(), audio.sample_rate, audio.sample_width), language="en")
+                print(f'{Back.BLACK}{Fore.CYAN}{Style.BRIGHT}User Said: {Fore.RESET}{Back.BLACK}{Fore.CYAN}{query}{Style.RESET_ALL}')
+
+                if query.lower() == "i will type":
+                    speak_enabled = False
+                    return input(f"{Back.BLACK}{Fore.LIGHTGREEN_EX}{Style.BRIGHT}You can type now: {Fore.RESET}{Back.BLACK}")
+                elif query.lower() == "i will speak":
+                    speak_enabled = True
+                    return query.lower()
+                else:
+                    return query.lower()
+            except sr.WaitTimeoutError:
+                print(f'{Back.BLACK}{Fore.YELLOW}{Style.BRIGHT}No input detected. Continuing to listen...{Style.RESET_ALL}')
+                return ""
+            except sr.UnknownValueError:
+                print(f'{Back.BLACK}{Fore.RED}{Style.BRIGHT}Could not understand audio. Please try again.{Style.RESET_ALL}')
+                return ""
+            except sr.RequestError as e:
+                print(f'{Back.BLACK}{Fore.RED}{Style.BRIGHT}Could not request results; {e}{Style.RESET_ALL}')
+                return ""
+    else:
+
+        user_input = input(f"{Back.BLACK}{Fore.LIGHTMAGENTA_EX}{Style.BRIGHT}You can type now: {Fore.RESET}{Back.BLACK}")
+        if user_input.lower() == "i will speak":
+            speak_enabled = True
+            print(f'{Back.BLACK}{Fore.MAGENTA}{Style.BRIGHT}Switching to speech input. Please speak.{Style.RESET_ALL}')
+            return takeCommand()
+        return user_input.lower()
+
+def play_youtube_music(song_name):
+    try:
+        print(f'{Back.BLACK}{Fore.GREEN}{Style.BRIGHT}Playing {song_name} from YouTube...{Style.RESET_ALL}')
+        kit.playonyt(song_name)
+        print(f'{Back.BLACK}{Fore.GREEN}{Style.BRIGHT}YouTube video should be opening now.{Style.RESET_ALL}')
+        time.sleep(5)
+    except Exception as e:
+        print(f'{Back.BLACK}{Fore.RED}{Style.BRIGHT}An error occurred while playing the song: {e}{Style.RESET_ALL}')
+
+
+def send_whatsapp_message():
+    speak("Please provide the phone number to send the message to.")
+    phone_number = takeCommand()
+    phone_number = ''.join(filter(str.isdigit, phone_number))
+
+    if not phone_number:
+        speak("I couldn't understand the phone number. Please try again.")
+        return
+
+    speak("What message would you like to send?")
+    message = takeCommand()
+
+    if not message:
+        speak("I couldn't understand the message. Please try again.")
+        return
+
+    try:
+        webbrowser.open(f"https://web.whatsapp.com/send?phone={phone_number}&text={message}")
+        time.sleep(10)
+        speak("WhatsApp message sent successfully.")
+    except Exception as e:
+        speak(f"An error occurred while sending the WhatsApp message: {str(e)}")
+
+from geopy.distance import great_circle
+
+from geopy.geocoders import Nominatim
+import folium
+import webbrowser
+import os
+
+def show_location_on_map():
+    geolocator = Nominatim(user_agent="my_agent")
+
+    speak("Please enter the location you want to see on the map.")
+    location = takeCommand()
+
+    try:
+        location_data = geolocator.geocode(location)
+
+        if not location_data:
+            speak("I couldn't find that location. Please try again with a more specific name.")
+            return
+
+        m = folium.Map(location=[location_data.latitude, location_data.longitude], zoom_start=12)
+
+        folium.Marker(
+            [location_data.latitude, location_data.longitude],
+            popup=location_data.address,
+            tooltip=location
+        ).add_to(m)
+
+        map_file = 'location_map.html'
+        m.save(map_file)
+
+        webbrowser.open('file://' + os.path.realpath(map_file))
+
+        speak(f"I've created a map showing {location} and opened it in your web browser.")
+
+    except Exception as e:
+        speak(f"An error occurred while finding the location: {str(e)}")
+
+def open_camera():
+    global camera_open, cap
+    try:
+        cap = cv2.VideoCapture(0)
+        if cap.isOpened():
+            camera_open = True
+            speak("Camera opened.")
+        else:
+            speak("Failed to open camera.")
+    except Exception as e:
+        speak(f"An error occurred while opening the camera: {e}")
+
+def close_camera():
+    global camera_open, cap
+    try:
+        if cap is not None:
+            cap.release()
+        cv2.destroyAllWindows()
+        camera_open = False
+        speak("Camera closed.")
+    except Exception as e:
+        speak(f"An error occurred while closing the camera: {e}")
+    finally:
+        cap = None
+        camera_open = False
+
+def take_photo():
+    global camera_open, cap
+    try:
+        if not camera_open:
+            open_camera()
+            time.sleep(1)
+
+        if camera_open and cap is not None:
+            ret, frame = cap.read()
+            if ret:
+                if not os.path.exists("photos"):
+                    os.makedirs("photos")
+                file_name = f"photos/photo_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+                cv2.imwrite(file_name, frame)
+                print(f"Photo taken and saved as {file_name}")
+                speak("Photo taken and saved successfully.")
+            else:
+                speak("Failed to capture image.")
+    except Exception as e:
+        speak(f"An error occurred while taking the photo.")
+    finally:
+        close_camera()
+
+def search_wikipedia(query):
+    try:
+        if "according to wikipedia" in query:
+            topic = query.split('according to wikipedia')[1].strip()
+        else:
+            topic = query
+
+        results = wikipedia.summary(topic, sentences=3)
+        response = f"Searching Wikipedia...\n\nHere's what I found about {topic}:\n\n{results}"
+        speak(response)
+    except wikipedia.DisambiguationError as e:
+        speak(f'There are multiple possible results for {topic}. Please be more specific.')
+    except wikipedia.PageError:
+        speak(f'Sorry, no information found on Wikipedia for {topic}.')
+    except Exception as e:
+        speak(f'An error occurred while searching Wikipedia: {e}')
+
+def generate_response(prompt):
+    try:
+        if len(prompt.split()) <= 1:
+            return "I'm sorry, but I need more context to provide a meaningful response. Could you please elaborate or ask a more specific question?"
+        response = chat.send_message(prompt)
+        return response.text
+    except Exception as e:
+        return f"I'm sorry, I encountered an error while processing your request: {str(e)}"
+
+def open_application(app_name):
+    app_name = app_name.lower()
+    if app_name in common_apps:
+        path = common_apps[app_name]
+        try:
+            if app_name == "explorer":
+                os.startfile(path)
+            else:
+                subprocess.Popen(path)
+            speak(f"Opening {app_name}")
+        except FileNotFoundError:
+            speak(f"Sorry, I couldn't find the application {app_name}")
+        except Exception as e:
+            speak(f"An error occurred while trying to open {app_name}: {str(e)}")
+    else:
+        speak(f"Sorry, I don't have the path for {app_name}")
+
+def open_website(website):
+    try:
+        url = website if website.startswith('http') else f"https://www.{website}.com"
+        webbrowser.open(url)
+        speak(f"Opening {website}")
+    except Exception as e:
+        speak(f"An error occurred while trying to open {website}: {str(e)}")
+
+def greet():
+    print("\033[1;31;42m\033[1mFabulous Speech-Text processor\033[m")
+
+def display_options():
+    print("\033[1;30;43m\033[1m 1) Text-to-Speech \033[m")
+    print("\033[1;30;43m\033[1m 2) Speech-to-Text \033[m")
+    print("\033[1;30;43m\033[1m 3) Translation History \033[m")
+
+async def translate_text(text, target_language):
+    url = f'https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl={target_language}&dt=t&q={text}'
+    response = await asyncio.to_thread(requests.get, url)
+    result = response.json()
+    translated_text = result[0][0][0]
+    return translated_text
+def text_to_speech():
+    text = input("\033[1;33;40m\033[1mEnter the text you want to convert to speech: \033[m")
+    print("\033[1;33;40m\033[1mSelect Language(s) for Text-to-Speech:\033[m")
+    dest_languages = input_languages().split()
+
+    for dest_language in dest_languages:
+        try:
+            translated_text = asyncio.run(translate_text(text, dest_language))
+            print(f"\033[1;44;35m\033[1mTranslated Text ({dest_language.upper()}): \033[m", end="")
+            print(f"\033[1;32m\033[1m{translated_text}\033[m")
+            translation_history.append((text, translated_text, dest_language))
+
+            tts = gTTS(text=translated_text, lang=dest_language, slow=False)
+            output_file = f"output_{dest_language}.mp3"
+            tts.save(output_file)
+
+            print(f"\033[1;36m\033[1mPlaying audio in {dest_language.upper()}...\033[m")
+            pygame.mixer.init()
+            pygame.mixer.music.load(output_file)
+            pygame.mixer.music.play()
+
+            while pygame.mixer.music.get_busy():
+                pygame.time.Clock().tick(10)
+
+            pygame.mixer.music.unload()
+            print(f"\033[1;36m\033[1mFinished playing audio in {dest_language.upper()}\033[m")
+
+        except Exception as e:
+            print(f"\033[1;31m\033[1mAn error occurred for language {dest_language}: {e}\033[m")
+
+
+def speech_to_text():
+    print("\033[1;33;40m\033[1mSelect Language for Speech Recognition:\033[m")
+    language_code = input_languages()
+
+    try:
+        recognizer = sr.Recognizer()
+
+        with sr.Microphone() as source:
+            print(f"\033[1;35;40m\033[1mSpeak something in {language_code.upper()}...\033[m")
+            audio = recognizer.listen(source)
+
+        text = recognizer.recognize_google(audio, language=language_code)
+        print(f"\033[1;32;40m\033[1mRecognized Text ({language_code.upper()}): \033[m", text)
+
+        dest_languages = input("\033[1;33;40m\033[1mEnter the destination language codes for translation (e.g., en, fr, de): \033[m").split()
+
+        for dest_language in dest_languages:
+            translated_text = asyncio.run(translate_text(text, dest_language))
+            print("\033[1;44;37m\033[1mTranslated Text (" + dest_language.upper() + "): \033[m" + translated_text)
+            translation_history.append((text, translated_text, dest_language))
+
+    except sr.UnknownValueError:
+        print("\033[1;31;40m\033[1mCould not understand audio\033[m")
+    except sr.RequestError as e:
+        print(f"\033[1;31;40m\033[1mError making the request: {e}\033[m")
+    except Exception as e:
+        print(f"An error occurred: {e}")
+
+def translation_history_display():
+    if translation_history:
+        print("\033[1;35;40m\033[1mTranslation History:\033[m")
+        for index, entry in enumerate(translation_history, start=1):
+            original_text, translated_text, language = entry
+            print(f"\033[1;36;40m\033[1m{index}. Original ({language.upper()}): \033[m{original_text}")
+            print(f"\033[1;36;40m\033[1m   Translated: \033[m{translated_text}")
+    else:
+        print("\033[1;31;40m\033[1mTranslation history is empty.\033[m")
+
+
+def input_languages():
+    language_names = {
+        "af": "Afrikaans", "ar": "Arabic", "bn": "Bengali", "bs": "Bosnian", "bg": "Bulgarian",
+        "ca": "Catalan", "zh-CN": "Chinese (Simplified)", "zh-TW": "Chinese (Traditional)", "hr": "Croatian",
+        "cs": "Czech", "da": "Danish", "nl": "Dutch", "en": "English", "et": "Estonian",
+        "fi": "Finnish", "fr": "French", "de": "German", "el": "Greek", "gu": "Gujarati",
+        "hi": "Hindi", "hu": "Hungarian", "is": "Icelandic", "id": "Indonesian", "it": "Italian",
+        "ja": "Japanese", "jw": "Javanese", "kn": "Kannada", "km": "Khmer", "ko": "Korean",
+        "la": "Latin", "lv": "Latvian", "ml": "Malayalam", "ms": "Malay", "mr": "Marathi",
+        "ne": "Nepali", "no": "Norwegian", "pl": "Polish", "pt": "Portuguese", "ro": "Romanian",
+        "ru": "Russian", "si": "Sinhala", "sk": "Slovak", "es": "Spanish", "su": "Sundanese",
+        "sw": "Swahili", "sv": "Swedish", "ta": "Tamil", "te": "Telugu", "th": "Thai",
+        "tl": "Filipino", "tr": "Turkish", "uk": "Ukrainian", "ur": "Urdu", "vi": "Vietnamese"
+    }
+
+    codes = list(language_names.keys())
+    names = list(language_names.values())
+
+    max_length = max(len(name) for name in names)
+
+    for i in range(0, len(codes), 4):
+        for j in range(i, min(i + 4, len(codes))):
+            code_color = "\033[1;35;40m"
+            name_color = "\033[1;46;30m"
+            print(f"{code_color}{codes[j]} {name_color}{names[j].ljust(max_length)}\033[m", end="\t")
+        print()
+
+    while True:
+        selected_codes = input(
+            "\033[1;33;40m\033[1mEnter the language code(s) (space-separated for multiple): \033[m").split()
+        invalid_codes = [code for code in selected_codes if code not in language_names]
+
+        if invalid_codes:
+            print(f"\033[1;31;40m\033[1mInvalid language code(s): {', '.join(invalid_codes)}. Please try again.\033[m")
+        else:
+            return ' '.join(selected_codes)
+
+
+def translator_main():
+    greet()
+    pygame.init()
+    while True:
+        display_options()
+        choice = input("\033[1;35;40m\033[1mChoose an option (1/2/3): \033[m")
+
+        if choice == "1":
+            text_to_speech()
+        elif choice == "2":
+            speech_to_text()
+        elif choice == "3":
+            translation_history_display()
+        else:
+            print("\033[1;31;40m\033[1mInvalid choice. Please enter 1, 2, or 3.\033[m")
+
+        continue_option = input(
+            "\033[1;33;40m\033[1mDo you want to continue using the translator? (yes/no): \033[m").lower()
+        if continue_option != "yes":
+            print("\033[1;32;40m\033[1mExiting the translator. Returning to the main program.\033[m")
+            break
+
+    pygame.quit()
+
+
+
+if _name_ == "_main_":
+    pygame.mixer.init()
+    pygame.mixer.music.set_volume(0.5)
+
+    print(f'{Back.BLACK}{Fore.BLUE}{Style.BRIGHT}TechThrive{Style.RESET_ALL}')
+    speak("Hi, I am ChatBot AI")
+    print()
+
+    start_time = datetime.now()
+    while True:
+        try:
+            query = takeCommand()
+
+            if not query:
+                continue
+
+            if 'open translator' in query:
+                translator_main()
+            elif query.startswith('open '):
+                app_name = query.split('open ', 1)[1].strip()
+                if not app_name:
+                    speak("Please specify which application or website you'd like to open.")
+                elif app_name in common_apps:
+                    open_application(app_name)
+                elif 'camera' in app_name:
+                    open_camera()
+                else:
+                    open_website(app_name)
+            elif 'play' in query and 'song' in query:
+                try:
+                    song_start_index = query.find('play') + len('play')
+                    song_end_index = query.find('song')
+                    song_name = query[song_start_index:song_end_index].strip()
+                    speak(f'Playing {song_name}...')
+                    play_youtube_music(song_name)
+                except Exception as e:
+                    print(f'{Back.BLACK}{Fore.RED}{Style.BRIGHT}An error occurred: {e}{Style.RESET_ALL}')
+            elif 'take photo' in query:
+                take_photo()
+            elif 'close camera' in query:
+                close_camera()
+            elif 'according to wikipedia' in query or 'tell me about' in query:
+                search_wikipedia(query)
+            elif 'send whatsapp message' in query:
+                send_whatsapp_message()
+            elif 'show map' in query or 'show location' in query:
+                show_location_on_map()
+            elif any(keyword in query for keyword in ['quit', 'exit', 'bye']):
+                speak('Goodbye. We will meet another time')
+
+                end_time = datetime.now()
+                time_used = end_time - start_time
+                minutes_used = time_used.seconds // 60
+                seconds_used = time_used.seconds % 60
+                print(
+                    f'{Back.BLACK}{Fore.GREEN}{Style.BRIGHT}Session started at: {Fore.RESET}{Back.BLACK}{Fore.GREEN}{start_time.strftime("%Y-%m-%d %H:%M:%S")}{Style.RESET_ALL}')
+                print(
+                    f'{Back.BLACK}{Fore.GREEN}{Style.BRIGHT}Session ended at: {Fore.RESET}{Back.BLACK}{Fore.GREEN}{end_time.strftime("%Y-%m-%d %H:%M:%S")}{Style.RESET_ALL}')
+                print(
+                    f'{Back.BLACK}{Fore.GREEN}{Style.BRIGHT}Time used: {Fore.RESET}{Back.BLACK}{Fore.GREEN}{minutes_used} min {seconds_used} sec{Style.RESET_ALL}')
+                break
+            else:
+                response = generate_response(query)
+                speak(response)
+
+            print()
+
+        except Exception as e:
+            print(f'{Back.BLACK}{Fore.RED}{Style.BRIGHT}An error occurred: {e}{Style.RESET_ALL}')
+            speak("I encountered an error. Please try again.")
+
+    pygame.mixer.music.stop()
+    pygame.quit()
