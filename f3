@@ -1,0 +1,34 @@
+import folium
+from geopy.distance import distance
+
+# Coordinates for two locations (San Francisco and Los Angeles)
+sf_coords = (37.7749, -122.4194)
+la_coords = (34.0522, -118.2437)
+
+# Calculate the distance between San Francisco and Los Angeles
+dist = distance(sf_coords, la_coords).km  # Distance in kilometers
+
+# Create a map centered between San Francisco and Los Angeles
+map_center = [(sf_coords[0] + la_coords[0]) / 2, (sf_coords[1] + la_coords[1]) / 2]
+m = folium.Map(location=map_center, zoom_start=6)
+
+# Add markers for San Francisco and Los Angeles
+folium.Marker(sf_coords, popup='San Francisco').add_to(m)
+folium.Marker(la_coords, popup='Los Angeles').add_to(m)
+
+# Add a line between San Francisco and Los Angeles
+folium.PolyLine([sf_coords, la_coords], color='blue', weight=2.5, opacity=1).add_to(m)
+
+# Add a popup with the calculated distance
+folium.Marker(
+    [(sf_coords[0] + la_coords[0]) / 2, (sf_coords[1] + la_coords[1]) / 2],
+    popup=f'Distance: {dist:.2f} kilometers',
+    icon=folium.Icon(icon='cloud')
+).add_to(m)
+
+# Save the map as an HTML file
+m.save('distance_map.html')
+
+# Display the map directly in the default web browser
+import webbrowser
+webbrowser.open('distance_map.html')
