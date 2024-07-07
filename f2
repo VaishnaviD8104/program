@@ -1,0 +1,397 @@
+import google.generativeai as ai
+import speech_recognition as sr
+import pyttsx3
+import webbrowser
+import pywhatkit as kit
+import pygame
+import time
+from datetime import datetime
+from colorama import Fore, Back, Style, init
+import cv2
+import os
+import numpy as np
+import wikipedia
+import textwrap
+import requests
+from gtts import gTTS
+import asyncio
+import subprocess
+
+# Initialize colorama
+init(autoreset=True)
+
+# Global variables
+speak_enabled = True
+camera_open = False
+cap = None
+translation_history = []
+
+# API Key for Google Generative AI
+API_KEY = 'AIzaSyBkMcatf6tikBK9rtSgfboTvNAjz4B0IPQ'
+
+# Configure the API
+ai.configure(api_key=API_KEY)
+
+# Create a new model
+model = ai.GenerativeModel("gemini-pro")
+chat = model.start_chat()
+
+def speak(text):
+    global speak_enabled
+    if speak_enabled:
+        engine = pyttsx3.init()
+        engine.say(text)
+        engine.runAndWait()
+
+    # Wrap the text to 80 characters per line
+    wrapped_text = textwrap.fill(text, width=80)
+    print(
+        f'{Back.BLACK}{Fore.YELLOW}{Style.BRIGHT}Chatbot: {Fore.RESET}{Back.BLACK}{Fore.YELLOW}{wrapped_text}{Style.RESET_ALL}')
+
+def reduce_noise(audio_data):
+    audio_array = np.frombuffer(audio_data, dtype=np.int16)
+    fft = np.fft.fft(audio_array)
+    magnitude = np.abs(fft)
+    threshold = np.mean(magnitude) * 2
+    fft[magnitude < threshold] = 0
+    return np.fft.ifft(fft).real.astype(np.int16).tobytes()
+
+def takeCommand():
+    global speak_enabled
+    r = sr.Recognizer()
+    with sr.Microphone() as source:
+        r.pause_threshold = 1.5
+        r.energy_threshold = 4000
+        r.dynamic_energy_threshold = True
+        print(f'{Back.BLACK}{Fore.MAGENTA}{Style.BRIGHT}Listening...{Style.RESET_ALL}')
+        try:
+            audio = r.listen(source, timeout=5)
+            audio_data = reduce_noise(audio.get_raw_data())
+            query = r.recognize_google(sr.AudioData(audio_data, audio.sample_rate, audio.sample_width), language="en")
+            print(
+                f'{Back.BLACK}{Fore.CYAN}{Style.BRIGHT}User Said: {Fore.RESET}{Back.BLACK}{Fore.CYAN}{query}{Style.RESET_ALL}')
+
+            if query.lower() == "i will type":
+                speak_enabled = False
+            elif query.lower() == "i will speak with you":
+                speak_enabled = True
+
+            return query.lower()
+        except sr.WaitTimeoutError:
+            print(f'{Back.BLACK}{Fore.YELLOW}{Style.BRIGHT}No input detected. Continuing to listen...{Style.RESET_ALL}')
+            return ""
+        except sr.UnknownValueError:
+            print(f'{Back.BLACK}{Fore.YELLOW}{Style.BRIGHT}Could not understand audio. Please try again.{Style.RESET_ALL}')
+            return ""
+        except sr.RequestError as e:
+            print(f'{Back.BLACK}{Fore.RED}{Style.BRIGHT}Could not request results; {e}{Style.RESET_ALL}')
+            return ""
+
+def play_youtube_music(song_name):
+    try:
+        print(f'{Back.BLACK}{Fore.GREEN}{Style.BRIGHT}Playing {song_name} from YouTube...{Style.RESET_ALL}')
+        kit.playonyt(song_name)
+        print(f'{Back.BLACK}{Fore.GREEN}{Style.BRIGHT}YouTube video should be opening now.{Style.RESET_ALL}')
+        time.sleep(5)
+    except Exception as e:
+        print(f'{Back.BLACK}{Fore.RED}{Style.BRIGHT}An error occurred while playing the song: {e}{Style.RESET_ALL}')
+
+def open_camera():
+    global camera_open, cap
+    try:
+        cap = cv2.VideoCapture(0)
+        if cap.isOpened():
+            camera_open = True
+            speak("Camera opened.")
+        else:
+            speak("Failed to open camera.")
+    except Exception as e:
+        speak(f"An error occurred while opening the camera: {e}")
+
+def close_camera():
+    global camera_open, cap
+    try:
+        if cap is not None:
+            cap.release()
+        cv2.destroyAllWindows()
+        camera_open = False
+        speak("Camera closed.")
+    except Exception as e:
+        speak(f"An error occurred while closing the camera: {e}")
+    finally:
+        cap = None
+        camera_open = False
+
+def take_photo():
+    global camera_open, cap
+    try:
+        if not camera_open:
+            open_camera()
+            time.sleep(1)  # Give some time for the camera to initialize
+
+        if camera_open and cap is not None:
+            ret, frame = cap.read()
+            if ret:
+                if not os.path.exists("photos"):
+                    os.makedirs("photos")
+                file_name = f"photos/photo_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+                cv2.imwrite(file_name, frame)
+                print(f"Photo taken and saved as {file_name}")
+                speak("Photo taken and saved successfully.")
+            else:
+                speak("Failed to capture image.")
+    except Exception as e:
+        speak(f"An error occurred while taking the photo.")
+    finally:
+        close_camera()
+
+def search_wikipedia(query):
+    try:
+        if "tell me about" in query:
+            topic = query.split('tell me about')[1].strip()
+        elif "according to wikipedia" in query:
+            topic = query.split('according to wikipedia')[1].strip()
+        else:
+            topic = query
+
+        results = wikipedia.summary(topic, sentences=3)
+        response = f"Searching Wikipedia...\n\nHere's what I found about {topic}:\n\n{results}"
+        speak(response)
+    except wikipedia.DisambiguationError as e:
+        speak(f'There are multiple possible results for {topic}. Please be more specific.')
+    except wikipedia.PageError:
+        speak(f'Sorry, no information found on Wikipedia for {topic}.')
+    except Exception as e:
+        speak(f'An error occurred while searching Wikipedia: {e}')
+
+def generate_response(prompt):
+    response = chat.send_message(prompt)
+    return response.text
+
+# Translator functions
+
+def greet():
+    print("\033[1;31;42m\033[1mFabulous Speech-Text processor\033[m")
+
+def display_options():
+    print("\033[1;30;43m\033[1m 1) Text-to-Speech \033[m")
+    print("\033[1;30;43m\033[1m 2) Speech-to-Text \033[m")
+    print("\033[1;30;43m\033[1m 3) Translation History \033[m")
+
+async def translate_text(text, target_language):
+    url = f'https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl={target_language}&dt=t&q={text}'
+    response = await asyncio.to_thread(requests.get, url)
+    result = response.json()
+    translated_text = result[0][0][0]
+    return translated_text
+
+def text_to_speech():
+    text = input("\033[1;33;40m\033[1mEnter the text you want to convert to speech: \033[m")
+    print("\033[1;33;40m\033[1mSelect Language for Text-to-Speech:\033[m")
+    dest_language = input_languages()
+
+    try:
+        translated_text = asyncio.run(translate_text(text, dest_language))
+        print(f"\033[1;44;35m\033[1mTranslated Text ({dest_language.upper()}): \033[m", end="")
+        print(f"\033[1;32m\033[1m{translated_text}\033[m")
+        translation_history.append((text, translated_text, dest_language))
+
+        tts = gTTS(text=translated_text, lang=dest_language, slow=False)
+        output_file = "output.mp3"
+        tts.save(output_file)
+
+        # Using Pygame to play the audio in the background
+        pygame.mixer.init()
+        pygame.mixer.music.load(output_file)
+        pygame.mixer.music.play()
+
+        # Wait for the audio to finish playing
+        while pygame.mixer.music.get_busy():
+            pygame.time.Clock().tick(10)  # Adjust tick rate if needed
+
+        pygame.mixer.music.unload()  # Release the audio file after playing
+
+    except Exception as e:
+        print(f"An error occurred: {e}")
+
+def speech_to_text():
+    print("\033[1;33;40m\033[1mSelect Language for Speech Recognition:\033[m")
+    language_code = input_languages()
+
+    try:
+        recognizer = sr.Recognizer()
+
+        with sr.Microphone() as source:
+            print(f"\033[1;35;40m\033[1mSpeak something in {language_code.upper()}...\033[m")
+            audio = recognizer.listen(source)
+
+        text = recognizer.recognize_google(audio, language=language_code)
+        print(f"\033[1;32;40m\033[1mRecognized Text ({language_code.upper()}): \033[m", text)
+
+        dest_languages = input("\033[1;33;40m\033[1mEnter the destination language codes for translation (e.g., en, fr, de): \033[m").split()
+
+        for dest_language in dest_languages:
+            translated_text = asyncio.run(translate_text(text, dest_language))
+            print("\033[1;44;37m\033[1mTranslated Text (" + dest_language.upper() + "): \033[m" + translated_text)
+            translation_history.append((text, translated_text, dest_language))
+
+    except sr.UnknownValueError:
+        print("\033[1;31;40m\033[1mCould not understand audio\033[m")
+    except sr.RequestError as e:
+        print(f"\033[1;31;40m\033[1mError making the request: {e}\033[m")
+    except Exception as e:
+        print(f"An error occurred: {e}")
+
+def translation_history_display():
+    if translation_history:
+        print("\033[1;35;40m\033[1mTranslation History:\033[m")
+        for index, entry in enumerate(translation_history, start=1):
+            original_text, translated_text, language = entry
+            print(f"\033[1;36;40m\033[1m{index}. Original ({language.upper()}): \033[m{original_text}")
+            print(f"\033[1;36;40m\033[1m   Translated: \033[m{translated_text}")
+    else:
+        print("\033[1;31;40m\033[1mTranslation history is empty.\033[m")
+
+def input_languages():
+    # Verified supported languages for both TTS and STT
+    language_names = {
+        "af": "Afrikaans", "ar": "Arabic", "bn": "Bengali", "bs": "Bosnian", "bg": "Bulgarian",
+        "ca": "Catalan", "zh-CN": "Chinese (Simplified)", "zh-TW": "Chinese (Traditional)", "hr": "Croatian",
+        "cs": "Czech", "da": "Danish", "nl": "Dutch", "en": "English", "et": "Estonian",
+        "fi": "Finnish", "fr": "French", "de": "German", "el": "Greek", "gu": "Gujarati",
+        "hi": "Hindi", "hu": "Hungarian", "is": "Icelandic", "id": "Indonesian", "it": "Italian",
+        "ja": "Japanese", "jw": "Javanese", "kn": "Kannada", "km": "Khmer", "ko": "Korean",
+        "la": "Latin", "lv": "Latvian", "ml": "Malayalam", "ms": "Malay", "mr": "Marathi",
+        "ne": "Nepali", "no": "Norwegian", "pl": "Polish", "pt": "Portuguese", "ro": "Romanian",
+        "ru": "Russian", "si": "Sinhala", "sk": "Slovak", "es": "Spanish", "su": "Sundanese",
+        "sw": "Swahili", "sv": "Swedish", "ta": "Tamil", "te": "Telugu", "th": "Thai",
+        "tl": "Filipino", "tr": "Turkish", "uk": "Ukrainian", "ur": "Urdu", "vi": "Vietnamese"
+    }
+
+    codes = list(language_names.keys())
+    names = list(language_names.values())
+
+    max_length = max(len(name) for name in names)
+
+    for i in range(0, len(codes), 4):
+        for j in range(i, min(i + 4, len(codes))):
+            code_color = "\033[1;35;40m"  # Black background, pink font
+            name_color = "\033[1;46;30m"  # Light blue background, black font
+            print(f"{code_color}{codes[j]} {name_color}{names[j].ljust(max_length)}\033[m", end="\t")
+        print()
+
+    selected_code = input("\033[1;33;40m\033[1mEnter the language code: \033[m")
+    while selected_code not in language_names:
+        print("\033[1;31;40m\033[1mInvalid language code. Please try again.\033[m")
+        selected_code = input("\033[1;33;40m\033[1mEnter the language code: \033[m")
+
+    return selected_code
+
+def translator_main():
+    greet()
+    pygame.init()
+    while True:
+        display_options()
+        choice = input("\033[1;35;40m\033[1mChoose an option (1/2/3): \033[m")
+
+        if choice == "1":
+            text_to_speech()
+        elif choice == "2":
+            speech_to_text()
+        elif choice == "3":
+            translation_history_display()
+        else:
+            print("\033[1;31;40m\033[1mInvalid choice. Please enter 1, 2, or 3.\033[m")
+
+        continue_option = input("\033[1;33;40m\033[1mDo you want to continue using the translator? (yes/no): \033[m").lower()
+        if continue_option != "yes":
+            print("\033[1;32;40m\033[1mExiting the translator. Returning to the main program.\033[m")
+            break
+
+    pygame.quit()
+
+app_paths = {
+    '7-Zip': 'C:\\Program Files\\7-Zip\\7zFM.exe',
+    'Duet Display': 'c:\\Program Files\\Duet\\Duet Display\\DuetDisplay.exe',
+    'Microsoft Office': 'C:\\Program Files\\Microsoft Office\\root\\Office16\\WINWORD.EXE',
+    'NetBeans': 'C:\\Program Files\\NetBeans-19\\netbeans64.exe',
+    'OneNote': 'C:\\Program Files\\Microsoft Office\\root\\Office16\\ONENOTE.EXE',
+    'VLC': 'C:\\Program Files\\VideoLAN\\VLC\\vlc.exe',
+    'MySQL Workbench': 'C:\\Program Files\\MySQL\\MySQL Workbench 8.0\\MySQLWorkbench.exe',
+    'Chrome': 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+    'IntelliJ': 'C:\\Program Files\\JetBrains\\IntelliJ IDEA 2024.1.1\\bin\\idea64.exe',
+    'PyCharm': 'C:\\Program Files\\JetBrains\\PyCharm Community Edition 2022.3.2\\bin\\pycharm64.exe'
+}
+
+def open_application(app_name):
+    """
+    Opens the specified application if it exists in app_paths dictionary.
+    """
+    for name, path in app_paths.items():
+        if app_name.lower() in name.lower():
+            subprocess.Popen(path)
+            print(f"Opening {name}.")
+            return
+    print(f"Could not find an application named {app_name}.")
+
+if _name_ == "_main_":
+    pygame.mixer.init()
+    pygame.mixer.music.set_volume(0.5)
+
+    print(f'{Back.BLACK}{Fore.BLUE}{Style.BRIGHT}PyCharm{Style.RESET_ALL}')
+    speak("Hi, I am ChatBot AI")
+    print()  # Add a line break after the initial greeting
+
+    start_time = datetime.now()
+    while True:
+        query = takeCommand()
+
+        if not query:  # If no input is detected, continue the loop
+            continue
+
+        if 'open translator' in query:
+            translator_main()
+        elif 'open' in query:
+            if 'camera' in query:
+                open_camera()
+            else:
+                website_name = query.split('open')[1].strip()
+                speak(f'Opening {website_name}, sir...')
+                webbrowser.open(f"https://www.{website_name}.com")
+        elif 'play' in query and 'song' in query:
+            try:
+                song_start_index = query.find('play') + len('play')
+                song_end_index = query.find('song')
+                song_name = query[song_start_index:song_end_index].strip()
+                speak(f'Playing {song_name}...')
+                play_youtube_music(song_name)
+            except Exception as e:
+                print(f'{Back.BLACK}{Fore.RED}{Style.BRIGHT}An error occurred: {e}{Style.RESET_ALL}')
+        elif 'take photo' in query:
+            take_photo()
+        elif 'close camera' in query:
+            close_camera()
+        elif 'according to wikipedia' in query or 'tell me about' in query:
+            search_wikipedia(query)
+        elif any(keyword in query for keyword in ['quit', 'exit', 'bye']):
+            speak('Goodbye, sir.')
+
+            end_time = datetime.now()
+            time_used = end_time - start_time
+            minutes_used = time_used.seconds // 60
+            seconds_used = time_used.seconds % 60
+            print(
+                f'{Back.BLACK}{Fore.GREEN}{Style.BRIGHT}Session started at: {Fore.RESET}{Back.BLACK}{Fore.GREEN}{start_time.strftime("%Y-%m-%d %H:%M:%S")}{Style.RESET_ALL}')
+            print(
+                f'{Back.BLACK}{Fore.GREEN}{Style.BRIGHT}Session ended at: {Fore.RESET}{Back.BLACK}{Fore.GREEN}{end_time.strftime("%Y-%m-%d %H:%M:%S")}{Style.RESET_ALL}')
+            print(
+                f'{Back.BLACK}{Fore.GREEN}{Style.BRIGHT}Time used: {Fore.RESET}{Back.BLACK}{Fore.GREEN}{minutes_used} min {seconds_used} sec{Style.RESET_ALL}')
+            break
+        else:
+            response = generate_response(query)
+            speak(response)
+
+        print()  # Add a line break after each question-answer set
+
+    pygame.mixer.music.stop()
+    pygame.quit()
